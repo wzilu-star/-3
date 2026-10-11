@@ -25,7 +25,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import ensure_dir, load_config, read_jsonl, resolve  # noqa: E402
+from utils import (ensure_dir, faiss_save, load_config, pick_device,  # noqa: E402
+                   read_jsonl, resolve, resolve_model)
 
 # 财报专有词典：不加载它，jieba 会把「归母净利润」这类术语切碎
 FINANCE_WORDS = [
@@ -113,21 +114,49 @@ def build_faiss(cfg: dict, chunks: list[dict], rebuild: bool) -> None:
         import faiss
         from sentence_transformers import SentenceTransformer
 
-        print(f"[编码] 模型 {idx_cfg['embed_model']}（首次会下载权重，需联网）")
-        model = SentenceTransformer(idx_cfg["embed_model"])
+        emb_src = resolve_model(idx_cfg["embed_model"])
+        device = pick_device()
+        print(f"[编码] 模型 {emb_src}（首次会下载权重，需联网）→ 设备 {device}")
+        if device == "cpu":
+            print("       [提示] 没检测到 CUDA。bge-m3 在 CPU 上编码 7500 个块实测要十几小时："
+                  "\n              要么装 CUDA 版 torch（pip install torch --index-url "
+                  "https://download.pytorch.org/whl/cu130），"
+                  "\n              要么把 config.yaml 的 embed_model 换成小模型"
+                  "（如 BAAI/bge-small-zh-v1.5）。")
+        model = SentenceTransformer(emb_src, device=device)
         texts = [c["text_for_index"] for c in chunks]
 
-        embs = model.encode(
-            texts, batch_size=idx_cfg["embed_batch_size"],
-            normalize_embeddings=True, show_progress_bar=True,
-            convert_to_numpy=True,
-        ).astype("float32")
+        batch = int(idx_cfg["embed_batch_size"])
+        # 显存不够就自动减半重试。
+        # 起因：config 里写的 32 是按大卡调的，但 4GB 的笔记本 N 卡（如 RTX 3050）
+        # 装 bge-m3 本身就吃掉 2.3GB（fp32 568M 参数），剩下不到 2GB 再开 batch 32
+        # 的激活值必然 OOM。与其让用户自己去猜该填几，不如撞到 OOM 就腰斩一次，
+        # 直到 batch=1；batch 小只是慢，不影响结果。
+        while True:
+            try:
+                embs = model.encode(
+                    texts, batch_size=batch,
+                    normalize_embeddings=True, show_progress_bar=True,
+                    convert_to_numpy=True,
+                ).astype("float32")
+                break
+            except RuntimeError as e:
+                if "out of memory" not in str(e).lower() or batch <= 1:
+                    raise
+                try:
+                    import torch
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                batch = max(1, batch // 2)
+                print(f"       [显存不足] batch 降到 {batch} 重试 ...")
 
         index = faiss.IndexFlatIP(embs.shape[1])   # 归一化后内积 = 余弦相似度
         index.add(embs)
-        faiss.write_index(index, str(faiss_path))
+        faiss_save(index, faiss_path)
         meta_path.write_text(json.dumps(
-            {"model": idx_cfg["embed_model"], "count": len(chunks), "dim": int(embs.shape[1])},
+            {"model": idx_cfg["embed_model"], "count": len(chunks),
+             "dim": int(embs.shape[1]), "device": device},
             ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[完成] 向量索引 {index.ntotal} 条 → {faiss_path}")
 

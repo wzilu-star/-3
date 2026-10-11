@@ -472,8 +472,10 @@ def main() -> None:
     Rag = import_module("05_rag").Retriever
     rag = Rag(cfg)
 
+    real = resolve(cfg["paths"]["chunks_path"]).exists()
+    corpus = "真实年报" if real else "仿真数据"
     print("\n" + "=" * 78)
-    print("问答演示（仿真数据 · light 后端）")
+    print(f"问答演示（{corpus} · {rag.backend} 后端 · provider={cfg['generate']['provider']}）")
     print("=" * 78)
 
     results = []
@@ -481,7 +483,10 @@ def main() -> None:
         out = rag.search(q)
         out["question"] = q
         out["label"] = label
-        out["answer"] = rag._demo_answer(q, out["hits"])
+        # 走 rag.generate 而不是写死 _demo_answer：这样页面预览会跟随
+        # config.yaml 的 generate.provider（demo 配置下行为与之前完全一致，
+        # 配成 local/ollama/openai 时预览里就是真·模型生成的带出处答案）。
+        out["answer"] = rag.generate(q, out["hits"])
         results.append(out)
 
         comps = {h["company"] for h in out["hits"]}

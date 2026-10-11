@@ -110,7 +110,10 @@ def extract_one_pdf(pdf_path: Path, meta: dict, cfg: dict) -> list[dict]:
                     md_header = header
                     prev_table_header = header
 
-                md = table_to_markdown(rows, header=md_header)
+                # rows[0] 是表头行（可能是本表自己的，也可能是续页重复的表头），
+                # 它已经通过 header= 单独传进去了；正文要从第 2 行开始，
+                # 否则 table_to_markdown 会把表头同时当作第一行数据再输出一遍。
+                md = table_to_markdown(rows[1:], header=md_header)
                 if not md:
                     continue
 

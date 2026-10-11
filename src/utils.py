@@ -32,6 +32,40 @@ def ensure_dir(p: str | Path) -> Path:
     return d
 
 
+def resolve_model(name: str) -> str:
+    """把模型名解析成「本地目录优先，否则 HuggingFace repo id」。
+
+    config.yaml 里写的是可复现的 repo id（如 BAAI/bge-m3），评审 clone 下来
+    由 huggingface_hub 自己会去下。但有些内网/镜像环境下 Python 客户端会卡死
+    （证书、xet、并发都有关系），此时可以先用 `python tools/fetch_models.py`
+    把权重 curl 到 models/<repo 末段>/，这里检测到本地目录就优先用它。
+
+    判定标准是目录里存在 config.json——只有下了一半的目录不会被误用。
+    """
+    if os.path.isabs(name):
+        return name
+    d = ROOT / "models" / name.split("/")[-1]
+    if (d / "config.json").exists():
+        return str(d)
+    return name
+
+
+def pick_device() -> str:
+    """有 CUDA 就用 CUDA，否则 CPU。
+
+    这是个数量级的差别：bge-m3（568M 参数）在 16 核 CPU 上编码 7504 个 chunk
+    实测要 ~14 小时（235 个 batch，每个 200~330 秒），换到 RTX 3050 上只要几分钟。
+    但不能写死 cuda——评审的机器、Colab 免费层、纯 CPU 环境都得能跑起来。
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
 def company_names(cfg: dict) -> list[str]:
     return [c["name"] for c in cfg["companies"]]
 
@@ -146,6 +180,36 @@ def write_jsonl(path: str | Path, records) -> int:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             n += 1
     return n
+
+
+def faiss_save(index, path: str | Path) -> Path:
+    """写 FAISS 索引，绕开 Windows 中文路径。
+
+    faiss 自带的 write_index 内部走 C 的 fopen，在 Windows 上按 **ANSI 代码页**
+    解释路径；只要路径里含中文（比如项目放在 `...\\作业\\...`），就会报
+    `could not open ... index.faiss for writing: No such file or directory`
+    —— 而那个目录其实好好地在那儿，报错信息极具误导性。
+
+    改法：serialize_index 先变成 numpy 字节数组，再交给 Python 的 open() 写。
+    Python 走的是宽字符 API，中文路径没问题；文件格式和 write_index 完全一致，
+    两个函数可以互相读对方写的文件。
+    """
+    import faiss
+    p = resolve(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = faiss.serialize_index(index)
+    with open(p, "wb") as f:
+        f.write(data.tobytes())
+    return p
+
+
+def faiss_load(path: str | Path):
+    """读 FAISS 索引，与 faiss_save 配对（同样为了中文路径能读）。"""
+    import faiss
+    import numpy as np
+    with open(resolve(path), "rb") as f:
+        data = np.frombuffer(f.read(), dtype="uint8").copy()
+    return faiss.deserialize_index(data)
 
 
 def context_header(rec: dict) -> str:

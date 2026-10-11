@@ -11,6 +11,9 @@ index/faiss/*
 index/*.pkl
 index/*.index
 
+# 模型权重（bge-m3 / Qwen 加起来 5GB+，用 tools/fetch_models.py 自己下）
+models/
+
 # 但保留目录占位，避免 clone 后目录不存在
 !**/.gitkeep
 

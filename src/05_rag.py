@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import (detect_companies, is_panorama_question, load_config,  # noqa: E402
-                   read_jsonl, resolve)
+from utils import (detect_companies, faiss_load, is_panorama_question,  # noqa: E402
+                   load_config, pick_device, read_jsonl, resolve, resolve_model)
 
 
 class Retriever:
@@ -94,14 +94,17 @@ class Retriever:
     def model(self):
         if self._model is None:
             from sentence_transformers import SentenceTransformer
-            self._model = SentenceTransformer(self.cfg["index"]["embed_model"])
+            # 编码器和建索引时用同一个设备，否则查询向量和库里的向量不在同一 dtype/device 上
+            self._model = SentenceTransformer(
+                resolve_model(self.cfg["index"]["embed_model"]), device=pick_device())
         return self._model
 
     @property
     def index(self):
         if self._index is None:
-            import faiss
-            self._index = faiss.read_index(str(resolve(self.cfg["index"]["vector_dir"]) / "index.faiss"))
+            # 用 faiss_load 而不是 faiss.read_index：后者在 Windows 上读不了含中文的路径
+            self._index = faiss_load(
+                resolve(self.cfg["index"]["vector_dir"]) / "index.faiss")
         return self._index
 
     @property
@@ -170,6 +173,19 @@ class Retriever:
         years = set(_re.findall(r"(20\d{2})\s*年", question))
         return years.pop() if len(years) == 1 else None
 
+    def _mode_k(self, base: int, which: str) -> int:
+        """把「该检索通路是否开启」带进配额召回。
+
+        `vector_top_k` / `bm25_top_k` 置 0 表示关掉那条通路 —— 页面侧边栏的
+        「仅向量 / 仅 BM25 / 混合」和 tools/mode_compare.py 都靠这个开关切模式。
+
+        但全景题走的是 _quota_search，它是按「每家公司 quota*N」取块的，
+        取块数不是从这两个配置推出来的。如果不在这里把开关带下去，
+        切模式对全景题**完全无效** —— 表现为三种模式召回一模一样的块，
+        而页面上却显示「已切换到仅 BM25」，属于静默失效。
+        """
+        return base if self.cfg["retrieve"].get(which, 0) > 0 else 0
+
     def _quota_search(self, question: str, companies: list[str],
                       year: str | None = None) -> list[list[tuple[str, float]]]:
         """跨公司配额召回：每家公司单独检索，各取 quota 块。
@@ -187,8 +203,8 @@ class Retriever:
         groups: list[list[tuple[str, float]]] = []
         for comp in companies:
             sub_q = f"{comp} {question}"
-            vec = self.vector_search(sub_q, quota * 6)
-            bm = self.bm25_search(sub_q, quota * 6)
+            vec = self.vector_search(sub_q, self._mode_k(quota * 6, "vector_top_k"))
+            bm = self.bm25_search(sub_q, self._mode_k(quota * 6, "bm25_top_k"))
             fused = self._rrf(vec, bm)
 
             def _ok(cid: str) -> bool:
@@ -201,8 +217,9 @@ class Retriever:
                          if _ok(cid)]
             # 若限年份后无块，放宽配额多取一些再筛（避免该家直接掉出汇总表）
             if not comp_hits and year:
-                extra = self._rrf(self.vector_search(sub_q, quota * 20),
-                                  self.bm25_search(sub_q, quota * 20))
+                extra = self._rrf(
+                    self.vector_search(sub_q, self._mode_k(quota * 20, "vector_top_k")),
+                    self.bm25_search(sub_q, self._mode_k(quota * 20, "bm25_top_k")))
                 comp_hits = [(cid, s) for cid, s in sorted(extra.items(), key=lambda x: -x[1])
                              if _ok(cid)]
             if comp_hits:
@@ -388,6 +405,9 @@ class Retriever:
         if provider == "demo":
             return self._demo_answer(question, hits)
 
+        if provider == "local":
+            return self._local_answer(question, hits)
+
         if provider == "ollama":
             import requests
             url = self.cfg["generate"]["ollama_base_url"].rstrip("/") + "/api/chat"
@@ -414,6 +434,64 @@ class Retriever:
             return r.choices[0].message.content
 
         return "（未知的 generate.provider）"
+
+    # ---------------- local 模式（进程内本地小模型）----------------
+    # 用 transformers 直接跑一个中文 instruct 小模型，不需要 API key、也不需要
+    # 另起 ollama 服务。首次运行会从 HuggingFace 下载权重（1.5B 约 3GB）；
+    # 国内网络可先设镜像：set HF_ENDPOINT=https://hf-mirror.com
+    # 纯 CPU 推理，10 道题的评测量级可以接受；追求质量请改用 ollama / openai。
+    _local_bundle = None
+
+    def _local_answer(self, question: str, hits: list[dict]) -> str:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        gen_cfg = self.cfg["generate"]
+        model_name = resolve_model(
+            gen_cfg.get("local_model", "Qwen/Qwen2.5-1.5B-Instruct"))
+
+        if Retriever._local_bundle is None:
+            device = pick_device()
+            print(f"[local] 加载本地模型 {model_name}（首次需下载权重）→ 设备 {device} ...")
+            tok = AutoTokenizer.from_pretrained(model_name)
+            if device == "cuda":
+                # 显卡只有 4GB，fp32 装不下 1.5B（6.2GB）；fp16 是 3.1GB，刚好。
+                # 万一还是 OOM（上下文太长时 KV cache 会顶上去），退回 CPU fp32，
+                # 慢是慢，但不能因为显存小就直接崩掉。
+                try:
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name, dtype=torch.float16).to("cuda")
+                except Exception as e:
+                    print(f"[local] 显存不足，退回 CPU：{type(e).__name__}")
+                    device = "cpu"
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name, dtype=torch.float32)
+            else:
+                model = AutoModelForCausalLM.from_pretrained(model_name, dtype=torch.float32)
+            model.eval()
+            Retriever._local_bundle = (tok, model, device)
+        tok, model, device = Retriever._local_bundle
+
+        # 全景题的上下文可能上百 KB，按模型上限截断，避免超长直接报错
+        max_ctx = int(gen_cfg.get("local_max_context", 12288))
+        text = tok.apply_chat_template(
+            [{"role": "system", "content": self.SYSTEM_PROMPT},
+             {"role": "user", "content": self.build_prompt(question, hits)}],
+            tokenize=False, add_generation_prompt=True,
+        )
+        inputs = tok(text, return_tensors="pt", truncation=True, max_length=max_ctx)
+        if device == "cuda":
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        with torch.no_grad():
+            out = model.generate(
+                **inputs,
+                max_new_tokens=int(gen_cfg.get("max_tokens", 1024)),
+                do_sample=False,          # 财报问答要事实一致，不做采样
+            )
+        # .cpu() 是必须的：tokenizer.decode 内部要走 numpy，
+        # CUDA 张量直接传进去会报「can't convert cuda:0 device type tensor to numpy」
+        gen = out[0][inputs["input_ids"].shape[1]:].cpu()
+        return tok.decode(gen, skip_special_tokens=True).strip()
 
     # ---------------- demo 模式（无需任何模型）----------------
     DEMO_EXT_HEAD = """**⚠️ 当前为 demo 模式（未接入大模型）**

@@ -14,9 +14,34 @@ numpy>=1.24.0
 # ===== 数据获取 =====
 requests>=2.31.0
 
-# ===== 生成（二选一：本地模型 或 在线 API）=====
-sentence-transformers>=2.6.0   # bge-m3 / bge-large-zh 本地编码（CPU 可跑）
+# ===== 生成（三选一：本地小模型 / ollama / 在线 API）=====
+sentence-transformers>=2.6.0   # bge-m3 / bge-large-zh 本地编码
+transformers>=4.40.0           # generate.provider=local 时在进程内跑小模型
 # openai>=1.30.0               # 若改用在线 LLM 作答，取消注释
+
+# !!! 有 NVIDIA 显卡就一定先装 CUDA 版 torch，这一步决定你能不能跑完 !!!
+# sentence-transformers 会连带装 torch，但默认装的是 PyPI 上的 CPU 版。
+# bge-m3 是 568M 参数的模型，实测在 16 核 CPU 上编码 7504 个 chunk 要 ~14 小时
+# （235 个 batch × 200~330 秒），换到 RTX 3050（4GB）上只要几分钟。
+# 装法（版本号要和已装的 torch 对齐，可用 python -c "import torch;print(torch.__version__)" 查）：
+#   pip install torch==<上一步装到的版本>+cu130 --index-url https://download.pytorch.org/whl/cu130
+# 装完用这行确认：python -c "import torch; print(torch.cuda.is_available())"   # 应为 True
+# 没有 N 卡也别硬扛 —— 把 config.yaml 的 embed_model 换成
+# BAAI/bge-small-zh-v1.5（24M 参数，CPU 上 ~半小时），检索链路完全一样。
 
 # ===== 页面 =====
 streamlit>=1.33.0
+
+# ===== 可选：导出 PDF 报告 / 自动截图 =====
+# markdown   把 eval/结论_一页.md 转成 HTML（tools/md_to_pdf.py 用）
+# playwright 驱动系统自带 Edge 打印 PDF、以及 tools/shoot.py 截图
+#            （装完要跑一次 `playwright install msedge` 或直接用系统 Edge，不下载 Chromium）
+markdown>=3.5
+# playwright>=1.40.0
+
+# ===== 注意：项目路径不要带中文 =====
+# faiss 的 write_index/read_index 内部用 C 的 fopen，在 Windows 上按 ANSI 代码页解释路径，
+# 路径里含中文（如 D:\作业\baijiu-finrag）会报 "could not open ... No such file or directory"，
+# 而目录其实存在，极难排查。
+# 本项目已在 src/utils.py 实现 faiss_save / faiss_load 绕开（serialize + Python 的 open），
+# 走 04_index.py / 05_rag.py 不会踩到；但你自己写脚本直接调 faiss.write_index 时会。

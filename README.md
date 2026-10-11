@@ -58,6 +58,10 @@ baijiu-finrag/
 │  └─ 06_eval.py             批量评测 10 题
 ├─ tools/
 │  ├─ make_demo_data.py      生成仿真数据（无需下载 PDF）
+│  ├─ fetch_models.py        用 curl 预取模型权重到 models/（HF 客户端卡住时的备选）
+│  ├─ mode_compare.py        三种检索模式（向量/BM25/混合）对比 → eval/mode_compare.md
+│  ├─ md_to_pdf.py           把「结论_一页.md」导成 PDF（借系统 Edge 排版）
+│  ├─ shoot.py               自动截问答页面（Playwright 驱动系统 Edge）
 │  └─ run_demo.py            一键演示 + 渲染页面预览 HTML
 ├─ app/streamlit_app.py      问答页面
 ├─ notebooks/colab_deploy.ipynb  Colab 一键部署
@@ -93,7 +97,7 @@ python tools/run_demo.py            # 自动造仿真数据 + 建轻量索引 + 
 ## 四、快速开始
 
 ```bash
-git clone https://github.com/<你的用户名>/baijiu-finrag.git
+git clone https://github.com/wzilu-star/-3.git baijiu-finrag
 cd baijiu-finrag
 pip install -r requirements.txt
 
@@ -113,8 +117,38 @@ python src/04_index.py --backend light   # 秒级完成，TF-IDF + BM25
 streamlit run app/streamlit_app.py
 ```
 
+**权重下载卡住**（国内常见：日志停在 `[编码] 模型 BAAI/bge-m3` 不动，而网速其实没问题）——
+换用 curl 下载，下到本地 `models/` 后 `src/utils.py:resolve_model()` 会自动优先用本地目录，
+`config.yaml` 不用改：
+
+```bash
+set HF_ENDPOINT=https://hf-mirror.com
+python tools/fetch_models.py    # 支持断点续传；models/ 已在 .gitignore 里
+```
+
 > `index.backend` 支持 `auto`（默认，有 faiss 就用 faiss，否则自动降级 light）。
 > **light 不是语义向量**，不做同义改写泛化，只适合演示与联调；正式评测请用 faiss。
+
+**建索引前先确认 torch 是 CUDA 版**——这一步决定你是等 5 分钟还是等 14 小时。
+PyPI 上的 torch 是 CPU 版，而 bge-m3 有 568M 参数：
+
+```bash
+python -c "import torch; print(torch.cuda.is_available())"      # 不是 True 的话↓
+pip install torch==<当前版本>+cu130 --index-url https://download.pytorch.org/whl/cu130
+```
+
+实测：16 核 CPU 编码 7504 个 chunk 要 ~14 小时（235 batch × 200~330s），
+RTX 3050 4GB 上几分钟。设备选择在 `src/utils.py:pick_device()`，没有 N 卡就换
+`BAAI/bge-small-zh-v1.5`，不要硬扛。
+
+**显存只有 4GB 也能跑**：`embed_batch_size` 撞到 CUDA OOM 时 `04_index.py` 会自动减半重试，
+不用手改配置。同理 `generate.max_tokens` 对小卡影响很大——生成速度约 1.7 token/s（RTX 3050 fp16），
+1024 token 要 10 分钟，512 只要 5 分钟，而这批题答案最长也就几百 token。
+
+> **项目路径别带中文。** faiss 的 `write_index`/`read_index` 内部用 C 的 `fopen`，
+> 在 Windows 上按 ANSI 代码页解释路径，路径含中文会报
+> `could not open ...index.faiss for writing: No such file or directory`（而目录其实存在）。
+> 本项目已用 `src/utils.py:faiss_save()/faiss_load()` 绕开，正常流程不会踩到。
 
 若网络受限、下载脚本失败，**用浏览器手工下载 PDF** 放到 `data/raw/<公司名>_<代码>/2024_年报.pdf` 即可，后续流程完全一样：
 
@@ -159,14 +193,22 @@ data/raw/五粮液_000858/2024_年报.pdf
 
 ## 七、生成模型配置
 
-`config.yaml` 里 `generate.provider` 四选一：
+`config.yaml` 里 `generate.provider` 五选一：
 
 | 值 | 说明 |
 |---|---|
-| `demo` | **默认**。无需任何模型，把最相关片段直接摆出来并附出处，用于零依赖演示 |
-| `ollama` | 本地模型，默认 `qwen2.5:7b`，需先 `ollama serve` |
+| `local` | **默认**。用 `transformers` 在进程内跑 `Qwen/Qwen2.5-1.5B-Instruct`，**不需要 API key、也不用起 ollama 服务**，纯 CPU 可跑。首次运行从 HuggingFace 下权重（约 3GB），国内网络先 `set HF_ENDPOINT=https://hf-mirror.com` |
+| `demo` | 无需任何模型，把最相关片段直接摆出来并附出处，用于零依赖演示 |
+| `ollama` | 本地模型，默认 `qwen2.5:7b`，需先 `ollama serve`。质量比 `local` 好，推荐正式演示用 |
 | `openai` | 读环境变量 `OPENAI_API_KEY`，或任何兼容 OpenAI 协议的服务 |
 | `none` | 只展示检索结果，不做任何加工 |
+
+> `local` 这个后端的意义是**可复现**：评审 clone 下来不用配任何密钥就能看到「带出处的真实回答」，
+> 而不是只看到检索片段。1.5B 模型在跨公司聚合题上会明显吃力——这本身就是结论页要分析的现象之一。
+>
+> 权重来源：`config.yaml` 里写的是 HuggingFace repo id。若本地 `models/<repo 末段>/` 已存在
+> （用 `tools/fetch_models.py` 下的），`src/utils.py:resolve_model()` 会自动改用它——
+> 所以同一份配置在有网和没网、镜像通和镜像不通的机器上都能跑。
 
 ## 七·五、检索参数里最容易配错的一处
 

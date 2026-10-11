@@ -49,7 +49,9 @@ index:
   #   auto  = 自动选择（默认）：能 import faiss 与 sentence_transformers 就用 faiss，否则降级 light
   backend: auto
   embed_model: BAAI/bge-m3     # 中文财报效果好；显存小可换 BAAI/bge-large-zh-v1.5
-  embed_batch_size: 32
+  # 编码批大小。显存小于 6GB 时调小（4GB 的 RTX 3050 实测要 ≤8）。
+  # 撞到 CUDA OOM 也不用改：04_index.py 会自动减半重试。
+  embed_batch_size: 8
   vector_dir: index/faiss
   bm25_path: index/bm25.pkl
   bm25_dict: index/finance_dict.txt
@@ -72,15 +74,23 @@ retrieve:
 
 # ---------- 生成 ----------
 generate:
-  # ollama(本地) | openai(在线API) | none(只展示检索结果，不生成)
+  # local(本地小模型) | ollama(本地) | openai(在线API) | none(不生成) | demo(抽取式演示)
+  # local = 用 transformers 在进程内跑一个小模型，不需要 API key、也不用起 ollama 服务。
+  #         首次运行会从 HuggingFace 下载权重（1.5B 约 3GB）；
+  #         国内网络先设镜像：set HF_ENDPOINT=https://hf-mirror.com
   # demo  = 无需任何模型：用抽取式方式把最相关片段拼成"参考答案"，
   #         让页面在完全离线的环境下也有可看的效果
-  provider: demo
+  provider: local
+  local_model: Qwen/Qwen2.5-1.5B-Instruct
+  local_max_context: 12288     # 送进本地模型的上下文 token 上限（全景题片段多，需要够大）
   ollama_model: qwen2.5:7b
   ollama_base_url: http://localhost:11434
   openai_model: gpt-4o-mini
   temperature: 0.1
-  max_tokens: 1024
+  # 单题生成上限。这批题的答案最长也就「12 家营收列一遍」，400~512 token 足够；
+  # 设 1024 只会让小显存机器白等 —— 实测 4GB 的 3050 上生成速度约 1.7 token/s，
+  # 1024 token 要 10 分钟，512 只要 5 分钟。答案长度不受影响。
+  max_tokens: 512
 
 # ---------- 路径 ----------
 paths:

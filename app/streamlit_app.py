@@ -82,6 +82,12 @@ def main() -> None:
                 st.session_state["question"] = q
 
     # ---------------- 提问区 ----------------
+    # 支持用 URL 参数直接带一个问题进来：?q=2024年哪家白酒公司毛利率最高
+    # 用途：① 分享/截图时不用手敲问题；② Colab 隧道地址后面接 ?q=... 就能直接演示某一题。
+    param_q = st.query_params.get("q")
+    if param_q and not st.session_state.get("question"):
+        st.session_state["question"] = param_q
+
     default_q = st.session_state.get("question", "")
     c1, c2 = st.columns([6, 1])
     with c1:
