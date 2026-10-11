@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>白酒行业财报 RAG 问答知识库</title>
+<style>
+  :root{ --ink:#1a1a1a; --sub:#6b6b6b; --line:#e8e8e8; --accent:#8B1E3F; --bg:#fbfbfa; }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.75;}
+  .wrap{max-width:960px;margin:0 auto;padding:64px 24px 96px;}
+  header{border-bottom:3px solid var(--accent);padding-bottom:24px;margin-bottom:40px;}
+  h1{font-size:2.1rem;margin:0 0 8px;letter-spacing:-.5px;}
+  .lead{color:var(--sub);font-size:1.02rem;margin:0;}
+  .tags{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;}
+  .tag{background:#fff;border:1px solid var(--line);border-radius:999px;
+       padding:3px 12px;font-size:.82rem;color:var(--sub);}
+  h2{font-size:1.25rem;margin:44px 0 14px;padding-left:12px;border-left:4px solid var(--accent);}
+  h3{font-size:1.02rem;margin:26px 0 8px;}
+  p,li{font-size:.95rem;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:18px 0;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 18px;}
+  .card b{display:block;font-size:.9rem;color:var(--accent);margin-bottom:4px;}
+  .card span{font-size:.86rem;color:var(--sub);}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.9rem;background:#fff;}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;}
+  th{background:#f4f1f2;font-weight:600;}
+  code{background:#f2f2f0;padding:2px 6px;border-radius:4px;font-size:.87rem;}
+  pre{background:#22201f;color:#e8e6e3;padding:16px;border-radius:8px;overflow:auto;font-size:.85rem;}
+  pre code{background:none;color:inherit;padding:0;}
+  .pipe{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:16px 0;font-size:.85rem;}
+  .step{background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 12px;}
+  .arrow{color:var(--accent);font-weight:700;}
+  .shot{background:#fff;border:1px dashed #ccc;border-radius:10px;padding:36px;text-align:center;
+        color:#aaa;font-size:.9rem;margin:14px 0;}
+  footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--line);
+         color:var(--sub);font-size:.85rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>白酒行业上市公司财报 RAG 问答知识库</h1>
+  <p class="lead">12 家白酒上市公司年报 → 文字与表格结构化抽取 → 带元数据切块 → 向量 + BM25 混合检索 → 带出处问答 → 10 题评测</p>
+  <div class="tags">
+    <span class="tag">Python</span><span class="tag">pdfplumber</span>
+    <span class="tag">FAISS</span><span class="tag">BM25</span>
+    <span class="tag">bge-m3</span><span class="tag">RRF 融合</span>
+    <span class="tag">Streamlit</span><span class="tag">Colab 可部署</span>
+  </div>
+</header>
+
+<h2>一、整体流程</h2>
+<div class="pipe">
+  <span class="step">① 下载年报</span><span class="arrow">→</span>
+  <span class="step">② 抽取文字 + 表格还原</span><span class="arrow">→</span>
+  <span class="step">③ 带元数据切块</span><span class="arrow">→</span>
+  <span class="step">④ 向量 + BM25 双索引</span><span class="arrow">→</span>
+  <span class="step">⑤ 混合检索 + 跨公司路由</span><span class="arrow">→</span>
+  <span class="step">⑥ 带出处问答页面</span><span class="arrow">→</span>
+  <span class="step">⑦ 10 题评测</span>
+</div>
+
+<h2>二、核心设计（决定成败的四处）</h2>
+<div class="grid">
+  <div class="card"><b>表格按行列还原</b><span>pdfplumber 抽取二维数组 → 转 Markdown 表格整表成块，跨页自动补表头，不用文本拍平。</span></div>
+  <div class="card"><b>块首注入上下文头</b><span>每个片段开头带【公司·代码·报告期·章节·页码】，检索与生成都看得见来源，跨公司题不串号。</span></div>
+  <div class="card"><b>跨公司配额召回</b><span>全景题对每家公司保底召回 N 块，避免 top-k 被单家公司霸榜；再先抽数值、后做比较。</span></div>
+  <div class="card"><b>单位口径显式化</b><span>识别「单位：万元/元」写入元数据并写进片段文本，答案强制先声明口径再给数字。</span></div>
+</div>
+
+<h2>三、评测设计</h2>
+<p>共 10 道题，其中跨公司全景题 3 道（要求 ≥2）。每题记录：召回块、答案对错、错误归因。</p>
+<table>
+  <thead><tr><th>类型</th><th>数量</th><th>考察点</th></tr></thead>
+  <tbody>
+    <tr><td>单公司 · 单指标抽取</td><td>3</td><td>基础检索精度</td></tr>
+    <tr><td>单公司 · 表格多指标</td><td>2</td><td>表格是否被结构化成块</td></tr>
+    <tr><td>单公司 · 跨年度对比</td><td>2</td><td>两期数据能否同时召回</td></tr>
+    <tr><td>跨公司 · 全景/比较</td><td>3</td><td>覆盖均衡与聚合能力</td></tr>
+  </tbody>
+</table>
+
+<p>错误归因使用固定枚举，便于统计定位系统短板：</p>
+<p><code>未召回</code> <code>召回但被忽略</code> <code>表格切碎</code> <code>单位口径混淆</code>
+   <code>跨公司未聚合</code> <code>检索被单公司霸榜</code> <code>数字算错</code></p>
+
+<h2>四、页面截图</h2>
+<div class="shot">此处放问答页面截图（对应 <code>docs/screenshots/</code> 目录）<br>
+  将截图文件重命名为 <code>qa.png</code> 后，把本行替换为 <code>&lt;img src="screenshots/qa.png" style="width:100%"&gt;</code></div>
+<div class="shot">此处放「检索过程 / 引用来源」展开截图</div>
+
+<h2>五、结论摘要</h2>
+<table>
+  <thead><tr><th>题型</th><th>表现</th><th>原因</th></tr></thead>
+  <tbody>
+    <tr><td>单公司单指标</td><td>好</td><td>指标名固定，BM25 关键词命中率高</td></tr>
+    <tr><td>表格多指标</td><td>较好</td><td>表格整块保留行列结构，数值未被切散</td></tr>
+    <tr><td>跨年度对比</td><td>一般</td><td>两期数据分处不同页面，需同时召回才能比对</td></tr>
+    <tr><td>跨公司全景/聚合</td><td>最弱</td><td>覆盖不均衡 + 缺少数值聚合步骤，详见 <code>eval/结论_一页.md</code></td></tr>
+  </tbody>
+</table>
+
+<h2>六、本地运行</h2>
+<pre><code>git clone &lt;你的仓库地址&gt; &amp;&amp; cd baijiu-finrag
+pip install -r requirements.txt
+
+python src/01_download.py      # 下载 12 家年报
+python src/02_extract.py       # 抽取文字与表格
+python src/03_chunk.py         # 切块
+python src/04_index.py         # 建向量 + BM25 索引
+python src/06_eval.py          # 跑 10 道评测题
+
+streamlit run app/streamlit_app.py   # 启动问答页面</code></pre>
+
+<footer>
+  白酒行业财报 RAG 问答知识库 · 数据来源：巨潮资讯网 / 上交所 / 深交所公开披露文件
+</footer>
+
+</div>
+</body>
+</html>

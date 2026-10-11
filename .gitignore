@@ -1,0 +1,33 @@
+# ===== 大数据不进 Git（体积大 / 可由脚本重建）=====
+data/raw/**/*.pdf
+data/extracted/*.jsonl
+data/chunks/*.jsonl
+
+# 索引产物
+# 注意：这里必须是 `index/faiss/*` 而不是 `index/faiss/`。
+# 写成整目录排除时，git 会直接跳过该目录，后面的 `!**/.gitkeep` 无法把它救回来，
+# 结果是 clone 下来 index/faiss 目录不存在——与下面「保留目录占位」的意图相矛盾。
+index/faiss/*
+index/*.pkl
+index/*.index
+
+# 但保留目录占位，避免 clone 后目录不存在
+!**/.gitkeep
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ===== 密钥（千万不要提交）=====
+.env
+*.key
+secrets.toml
+.streamlit/secrets.toml
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db

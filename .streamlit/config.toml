@@ -1,0 +1,12 @@
+[theme]
+base = "light"
+primaryColor = "#8B1E3F"      # 白酒主题色
+backgroundColor = "#FFFFFF"
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
