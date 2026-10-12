@@ -50,8 +50,26 @@ hr { border: none; border-top: 1px solid #ddd; margin: 14px 0; }
 h2, h3, table, pre { page-break-inside: avoid; }
 """
 
+# `--compact`：把上面这套排版整体收紧，用来把内容压进**单页**。
+# 交付要求是「一页结论」，正文一多就会溢到第二页——溢出的那几行既没信息量、
+# 又会让评审以为没按一页写。与其删内容，不如把字号/行距/边距各收紧一档：
+# 正文 10.5pt→9.5pt、行距 1.65→1.35、页边距 16mm→11mm，约多出 45% 版面。
+COMPACT_CSS = """
+@page { size: A4; margin: 13mm 12mm; }
+body { font-size: 10pt; line-height: 1.5; }
+h1 { font-size: 15pt; margin: 0 0 4px; padding-bottom: 6px; }
+h2 { font-size: 11.5pt; margin: 11px 0 5px; }
+h3 { font-size: 10.5pt; margin: 8px 0 4px; }
+p, li { margin: 4px 0; }
+table { margin: 6px 0; font-size: 9pt; }
+th, td { padding: 3px 6px; }
+code { font-size: 8.5pt; padding: 0 3px; }
+blockquote { margin: 5px 0; padding: 5px 9px; }
+hr { margin: 10px 0; }
+"""
 
-def md_to_html(md_text: str, title: str) -> str:
+
+def md_to_html(md_text: str, title: str, compact: bool = False) -> str:
     try:
         import markdown
     except ImportError:
@@ -60,16 +78,18 @@ def md_to_html(md_text: str, title: str) -> str:
         md_text, extensions=["tables", "fenced_code", "sane_lists"])
     return (
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
-        f"<title>{title}</title><style>{CSS}</style></head>"
+        f"<title>{title}</title><style>{CSS}{COMPACT_CSS if compact else ''}"
+        "</style></head>"
         f"<body>{body}</body></html>"
     )
 
 
-def html_to_pdf(html_path: Path, pdf_path: Path) -> None:
+def html_to_pdf(html_path: Path, pdf_path: Path, margin_mm: int = 16) -> None:
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         sys.exit("缺少 playwright：pip install playwright")
+    m = f"{margin_mm}mm"
     with sync_playwright() as p:
         # 用系统自带 Edge，不下载 Chromium（国内下 Chromium 常卡）
         try:
@@ -79,8 +99,7 @@ def html_to_pdf(html_path: Path, pdf_path: Path) -> None:
         page = browser.new_page()
         page.goto(html_path.as_uri(), wait_until="load")
         page.pdf(path=str(pdf_path), format="A4", print_background=True,
-                 margin={"top": "16mm", "bottom": "16mm",
-                         "left": "14mm", "right": "14mm"})
+                 margin={"top": m, "bottom": m, "left": m, "right": m})
         browser.close()
 
 
@@ -89,6 +108,8 @@ def main() -> None:
     ap.add_argument("src", help="输入 .md")
     ap.add_argument("--out", default=None, help="输出 .pdf（默认同目录同名）")
     ap.add_argument("--keep-html", action="store_true", help="保留中间 HTML")
+    ap.add_argument("--compact", action="store_true",
+                    help="紧凑排版（字号/行距/边距各收紧一档），用于把内容压进单页")
     args = ap.parse_args()
 
     src = Path(args.src)
@@ -104,8 +125,9 @@ def main() -> None:
 
     tmp_html = pdf_path.with_suffix(".html")
     tmp_html.write_text(
-        md_to_html(src.read_text(encoding="utf-8"), src.stem), encoding="utf-8")
-    html_to_pdf(tmp_html, pdf_path)
+        md_to_html(src.read_text(encoding="utf-8"), src.stem, args.compact),
+        encoding="utf-8")
+    html_to_pdf(tmp_html, pdf_path, margin_mm=13 if args.compact else 16)
     if not args.keep_html:
         tmp_html.unlink(missing_ok=True)
     print(f"[完成] {src.name} → {pdf_path}  ({pdf_path.stat().st_size/1024:.0f} KB)")

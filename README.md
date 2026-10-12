@@ -60,19 +60,22 @@ baijiu-finrag/
 │  ├─ make_demo_data.py      生成仿真数据（无需下载 PDF）
 │  ├─ fetch_models.py        用 curl 预取模型权重到 models/（HF 客户端卡住时的备选）
 │  ├─ mode_compare.py        三种检索模式（向量/BM25/混合）对比 → eval/mode_compare.md
-│  ├─ md_to_pdf.py           把「结论_一页.md」导成 PDF（借系统 Edge 排版）
+│  ├─ md_to_pdf.py           把「结论_一页.md」导成 PDF（借系统 Edge 排版，`--compact` 压进单页）
 │  ├─ shoot.py               自动截问答页面（Playwright 驱动系统 Edge）
 │  └─ run_demo.py            一键演示 + 渲染页面预览 HTML
 ├─ app/streamlit_app.py      问答页面
 ├─ notebooks/colab_deploy.ipynb  Colab 一键部署
 ├─ eval/
 │  ├─ questions.yaml         10 道评测题
-│  └─ 结论_一页.md           交付物③ 模板
+│  ├─ 结论_一页.md / .pdf     交付物③ 一页结论（正文严格排在一页内）
+│  ├─ 真值核对.md             10 题真值逐条抄自年报原文，是判对错的依据
+│  ├─ results_*.md           逐题原始记录：召回块 / 答案 / 对错 / 错因
+│  └─ mode_compare.md        三种检索模式的召回对比
 ├─ demo/                     仿真数据与演示结果
 ├─ docs/
 │  ├─ index.html             项目展示页（可挂 GitHub Pages）
 │  ├─ demo_preview.html      问答页面预览（由 run_demo.py 生成）
-│  └─ screenshots/           页面截图放这里
+│  └─ screenshots/           页面截图
 └─ data/ index/              运行产物（不进 Git）
 ```
 
@@ -237,6 +240,21 @@ panorama_top_k: 36        # 全景题最终送进模型的块数
 
 | 交付项 | 对应位置 |
 |---|---|
-| 代码仓库 | 本仓库 |
-| 页面截图 | `docs/screenshots/` |
-| 一页结论 | `eval/结论_一页.md` |
+| 代码仓库 | 本仓库（含 README 与完整复现步骤） |
+| 页面截图 | `docs/screenshots/01_单公司问答.png`、`02_引用来源_表格块.png` |
+| 一页结论 | `eval/结论_一页.md`（PDF 版 `eval/结论_一页.pdf`，正文严格排在一页内） |
+| 原始问答与证据记录 | `eval/results_20261011_204441.md`（逐题）、`eval/真值核对.md`（真值）、`eval/mode_compare.md`（召回对比） |
+
+### 一页结论怎么重新生成
+
+```cmd
+python tools/md_to_pdf.py eval/结论_一页.md --compact
+```
+
+`--compact` 把字号 / 行距 / 页边距各收紧一档——正文一多就会溢到第二页，
+而交付要求是「结论单独压缩为一页」。不传这个开关时，同一份 `.md` 会排到 2 页，
+上一版（内容更冗长的版本）按默认版式排到了 3 页。导完可自检页数：
+
+```cmd
+python -c "import pymupdf;print(pymupdf.open('eval/结论_一页.pdf').page_count)"
+```

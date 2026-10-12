@@ -34,6 +34,10 @@
   .arrow{color:var(--accent);font-weight:700;}
   .shot{background:#fff;border:1px dashed #ccc;border-radius:10px;padding:36px;text-align:center;
         color:#aaa;font-size:.9rem;margin:14px 0;}
+  .shot.filled{border-style:solid;border-color:var(--line);padding:0;overflow:hidden;}
+  .shot img{display:block;width:100%;height:auto;}
+  .shot figcaption{padding:10px 14px;color:var(--sub);font-size:.85rem;text-align:left;
+                   border-top:1px solid var(--line);}
   footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--line);
          color:var(--sub);font-size:.85rem;}
 </style>
@@ -88,9 +92,20 @@
    <code>跨公司未聚合</code> <code>检索被单公司霸榜</code> <code>数字算错</code></p>
 
 <h2>四、页面截图</h2>
-<div class="shot">此处放问答页面截图（对应 <code>docs/screenshots/</code> 目录）<br>
-  将截图文件重命名为 <code>qa.png</code> 后，把本行替换为 <code>&lt;img src="screenshots/qa.png" style="width:100%"&gt;</code></div>
-<div class="shot">此处放「检索过程 / 引用来源」展开截图</div>
+<figure class="shot filled">
+  <img src="screenshots/01_单公司问答.png" alt="单公司问答：答案、出处与召回指标">
+  <figcaption>问「贵州茅台2024年实现营业收入是多少？同比增速是多少？」——
+    答案 17,089,915.23 万元、同比 +15.71%，带【公司 报告期 第P56页】出处；
+    顶部指标条：召回片段 6 / 识别公司 贵州茅台 / 总耗时 57.15s。
+    侧边栏 <code>provider = local</code>、检索模式 = 混合（向量 + BM25 + RRF）。</figcaption>
+</figure>
+<figure class="shot filled">
+  <img src="screenshots/02_引用来源_表格块.png" alt="引用来源展开：chunk_id 与还原后的 Markdown 表格">
+  <figcaption>展开「引用来源」：<code>chunk_id = 贵州茅台600519-P63-0204</code>、
+    块元数据 <code>[table | 元 | score=0.0161]</code>，以及按行列还原成 Markdown 的利润表
+    （营业总收入 174,144,069,958.25 元 vs 营业收入 170,899,152,276.34 元）——
+    表格结构与单位都在，这正是单公司指标题能答对的原因。</figcaption>
+</figure>
 
 <h2>五、结论摘要</h2>
 <table>
@@ -99,7 +114,7 @@
     <tr><td>单公司单指标</td><td>好</td><td>指标名固定，BM25 关键词命中率高</td></tr>
     <tr><td>表格多指标</td><td>较好</td><td>表格整块保留行列结构，数值未被切散</td></tr>
     <tr><td>跨年度对比</td><td>一般</td><td>两期数据分处不同页面，需同时召回才能比对</td></tr>
-    <tr><td>跨公司全景/聚合</td><td>最弱</td><td>覆盖不均衡 + 缺少数值聚合步骤，详见 <code>eval/结论_一页.md</code></td></tr>
+    <tr><td>跨公司全景/聚合</td><td>最弱</td><td>公司覆盖 12/12 家、36 块全部召回，但模型不做多源数值聚合，退化成复读原文，详见 <code>eval/结论_一页.md</code></td></tr>
   </tbody>
 </table>
 
