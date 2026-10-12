@@ -241,7 +241,7 @@ panorama_top_k: 36        # 全景题最终送进模型的块数
 | 交付项 | 对应位置 |
 |---|---|
 | 代码仓库 | 本仓库（含 README 与完整复现步骤） |
-| 页面截图 | `docs/screenshots/01_单公司问答.png`、`02_引用来源_表格块.png` |
+| 页面截图 | `docs/screenshots/`：`01_单公司问答.png`、`02_引用来源_表格块.png`、`03_全景题_12家.png` |
 | 一页结论 | `eval/结论_一页.md`（PDF 版 `eval/结论_一页.pdf`，正文严格排在一页内） |
 | 原始问答与证据记录 | `eval/results_20261011_204441.md`（逐题）、`eval/真值核对.md`（真值）、`eval/mode_compare.md`（召回对比） |
 
