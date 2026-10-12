@@ -55,17 +55,17 @@ h2, h3, table, pre { page-break-inside: avoid; }
 # 又会让评审以为没按一页写。与其删内容，不如把字号/行距/边距各收紧一档：
 # 正文 10.5pt→9.5pt、行距 1.65→1.35、页边距 16mm→11mm，约多出 45% 版面。
 COMPACT_CSS = """
-@page { size: A4; margin: 13mm 12mm; }
-body { font-size: 10pt; line-height: 1.5; }
-h1 { font-size: 15pt; margin: 0 0 4px; padding-bottom: 6px; }
-h2 { font-size: 11.5pt; margin: 11px 0 5px; }
-h3 { font-size: 10.5pt; margin: 8px 0 4px; }
-p, li { margin: 4px 0; }
-table { margin: 6px 0; font-size: 9pt; }
+@page { size: A4; margin: 12mm 12mm; }
+body { font-size: 10pt; line-height: 1.42; }
+h1 { font-size: 14.5pt; margin: 0 0 4px; padding-bottom: 5px; }
+h2 { font-size: 11pt; margin: 9px 0 4px; }
+h3 { font-size: 10.5pt; margin: 7px 0 4px; }
+p, li { margin: 3px 0; }
+table { margin: 5px 0; font-size: 8.8pt; }
 th, td { padding: 3px 6px; }
 code { font-size: 8.5pt; padding: 0 3px; }
-blockquote { margin: 5px 0; padding: 5px 9px; }
-hr { margin: 10px 0; }
+blockquote { margin: 4px 0; padding: 4px 9px; }
+hr { margin: 9px 0; }
 """
 
 
@@ -127,7 +127,7 @@ def main() -> None:
     tmp_html.write_text(
         md_to_html(src.read_text(encoding="utf-8"), src.stem, args.compact),
         encoding="utf-8")
-    html_to_pdf(tmp_html, pdf_path, margin_mm=13 if args.compact else 16)
+    html_to_pdf(tmp_html, pdf_path, margin_mm=12 if args.compact else 16)
     if not args.keep_html:
         tmp_html.unlink(missing_ok=True)
     print(f"[完成] {src.name} → {pdf_path}  ({pdf_path.stat().st_size/1024:.0f} KB)")
